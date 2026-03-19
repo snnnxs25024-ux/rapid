@@ -1069,18 +1069,34 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
     }
   };
   const handleDeleteClient = async (id: number) => {
-    const confirmMsg = "⚠️ PERINGATAN KERAS!\n\nMenghapus Klien ini akan MENGHAPUS OTOMATIS semua Posisi dan Penempatan yang terhubung.\n\nApakah Anda yakin ingin melanjutkan?";
+    const confirmMsg = "⚠️ PERINGATAN KERAS!\n\nMenghapus Klien ini akan MENGHAPUS OTOMATIS semua Posisi dan Penempatan yang terhubung, serta melepaskan pelamar dari klien ini.\n\nApakah Anda yakin ingin melanjutkan?";
     if(!window.confirm(confirmMsg)) return;
 
     try {
+        // 1. Lepaskan pelamar dari klien ini agar tidak kena Foreign Key Constraint
+        const { error: updateAppErr } = await supabase
+            .from('applicants')
+            .update({ client_id: null, position_id: null, placement_id: null })
+            .eq('client_id', id);
+        if (updateAppErr) throw updateAppErr;
+
+        // 2. Hapus Penempatan & Posisi
         const { data: posToDelete } = await supabase.from('job_positions').select('id').eq('client_id', id);
         if (posToDelete && posToDelete.length > 0) {
              const posIds = posToDelete.map(p => p.id);
-             await supabase.from('job_placements').delete().in('position_id', posIds);
-             await supabase.from('job_positions').delete().in('id', posIds);
+             const { error: err1 } = await supabase.from('job_placements').delete().in('position_id', posIds);
+             if (err1) throw err1;
+             const { error: err2 } = await supabase.from('job_positions').delete().in('id', posIds);
+             if (err2) throw err2;
         }
-        await supabase.from('job_clients').delete().eq('id', id);
+
+        // 3. Hapus Klien
+        const { error: err3 } = await supabase.from('job_clients').delete().eq('id', id);
+        if (err3) throw err3;
+
         alert("Klien dan data terkait berhasil dihapus.");
+        fetchMasterData();
+        fetchApplicants();
     } catch (err: any) { alert("GAGAL MENGHAPUS: " + err.message); }
   };
 
@@ -1105,9 +1121,25 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
   };
   const handleDeletePosition = async (id: number) => {
     if(!window.confirm("Yakin ingin menghapus Posisi ini? Semua Penempatan di dalamnya akan terhapus.")) return;
-    await supabase.from('job_placements').delete().eq('position_id', id);
-    const { error } = await supabase.from('job_positions').delete().eq('id', id);
-    if(error) alert("Gagal hapus: " + error.message);
+    try {
+        // Lepaskan pelamar dari posisi ini
+        const { error: updateAppErr } = await supabase
+            .from('applicants')
+            .update({ position_id: null, placement_id: null })
+            .eq('position_id', id);
+        if (updateAppErr) throw updateAppErr;
+
+        const { error: err1 } = await supabase.from('job_placements').delete().eq('position_id', id);
+        if (err1) throw err1;
+
+        const { error: err2 } = await supabase.from('job_positions').delete().eq('id', id);
+        if (err2) throw err2;
+
+        fetchMasterData();
+        fetchApplicants();
+    } catch (err: any) {
+        alert("Gagal hapus: " + err.message);
+    }
   };
 
   const handleAddPlacement = async () => {
@@ -1132,8 +1164,22 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
   };
   const handleDeletePlacement = async (id: number) => {
      if(!window.confirm("Yakin ingin menghapus Penempatan ini?")) return;
-     const { error } = await supabase.from('job_placements').delete().eq('id', id);
-     if(error) alert("Gagal hapus: " + error.message);
+     try {
+         // Lepaskan pelamar dari penempatan ini
+         const { error: updateAppErr } = await supabase
+             .from('applicants')
+             .update({ placement_id: null })
+             .eq('placement_id', id);
+         if (updateAppErr) throw updateAppErr;
+
+         const { error } = await supabase.from('job_placements').delete().eq('id', id);
+         if (error) throw error;
+
+         fetchMasterData();
+         fetchApplicants();
+     } catch (err: any) {
+         alert("Gagal hapus: " + error.message);
+     }
   };
 
   // --- HELPERS ---
@@ -1208,7 +1254,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
   // Status Badge Logic for Drawer
   const getStatusBadge = (status: string) => {
      const styles = {
-        new: 'bg-blue-100 text-blue-700 border-blue-200',
+        new: 'bg-brand-100 text-brand-700 border-brand-200',
         process: 'bg-amber-100 text-amber-700 border-amber-200',
         interview: 'bg-purple-100 text-purple-700 border-purple-200',
         hired: 'bg-green-100 text-green-700 border-green-200',
@@ -2007,7 +2053,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
                     {activeDetailTab === 'profile' && (
                         <div className="space-y-6 animate-fadeIn">
                              {/* ... (Existing profile content) ... */}
-                             <div className="bg-gradient-to-r from-slate-800 to-slate-900 text-white p-5 rounded-xl shadow-lg relative overflow-hidden">
+                             <div className="bg-slate-900 text-white p-5 rounded-xl shadow-lg relative overflow-hidden border-l-4 border-brand-600">
                                         <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2"></div>
                                         
                                         <h3 className="font-bold text-xs text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
@@ -2033,7 +2079,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
                                         </div>
                                     </div>
 
-                             <div className="bg-white p-5 rounded-xl border border-blue-600 shadow-sm">
+                             <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
                                 <div className="flex justify-between items-center mb-4 border-b pb-2">
                                     <h3 className="font-bold text-gray-800 text-sm">Informasi Pribadi</h3>
                                     {!isEditing && <button onClick={startEditing} className="text-brand-600 text-xs hover:underline">Edit Data</button>}
@@ -2058,7 +2104,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
                                 </div>
                              </div>
 
-                             <div className="bg-white p-5 rounded-xl border border-blue-600 shadow-sm">
+                             <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
                                 <h3 className="font-bold text-gray-800 text-sm mb-4 border-b pb-2">Data Alamat & Lokasi</h3>
                                 <div className="space-y-4">
                                     {renderEditField("Alamat Sesuai KTP", "alamat_ktp")}
@@ -2076,7 +2122,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
                                 </div>
                              </div>
 
-                             <div className="bg-white p-5 rounded-xl border border-blue-600 shadow-sm">
+                             <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
                                 <h3 className="font-bold text-gray-800 text-sm mb-4 border-b pb-2">Motivasi & Lainnya</h3>
                                 {isEditing ? (
                                      <textarea 
@@ -2098,7 +2144,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
 
                     {activeDetailTab === 'qualification' && (
                         <div className="space-y-6 animate-fadeIn">
-                            <div className="bg-white p-5 rounded-xl border border-blue-600 shadow-sm">
+                            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
                                 <h3 className="font-bold text-gray-800 text-sm mb-4 flex items-center gap-2"><GraduationCap size={16}/> Pendidikan Terakhir</h3>
                                 <div className="grid grid-cols-2 gap-4">
                                     {renderEditField("Jenjang", "tingkat_pendidikan")}
@@ -2110,7 +2156,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
                                 </div>
                             </div>
                             
-                            <div className="bg-white p-5 rounded-xl border border-blue-600 shadow-sm">
+                            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
                                 <h3 className="font-bold text-gray-800 text-sm mb-4 flex items-center gap-2"><Briefcase size={16}/> Pengalaman Kerja</h3>
                                 {selectedApplicant.has_pengalaman_kerja ? (
                                     <div className="space-y-3">
@@ -2134,7 +2180,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
                                 )}
                             </div>
 
-                            <div className="bg-white p-5 rounded-xl border border-blue-600 shadow-sm">
+                            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
                                 <h3 className="font-bold text-gray-800 text-sm mb-4 flex items-center gap-2"><CheckCircle size={16}/> Aset & Dokumen</h3>
                                 <div className="grid grid-cols-2 gap-2 text-xs">
                                      {['kendaraan_pribadi', 'sim_c', 'sim_a', 'ktp_asli', 'skck', 'npwp', 'riwayat_buruk_kredit'].map(key => {
@@ -2155,7 +2201,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
 
                     {activeDetailTab === 'documents' && (
                         <div className="space-y-6 animate-fadeIn">
-                            <div className="bg-white p-5 rounded-xl border border-blue-600 shadow-sm">
+                            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
                                 <h3 className="font-bold text-gray-800 text-sm mb-4 flex items-center gap-2"><FileText size={16}/> File Dokumen</h3>
                                 <div className="grid gap-3">
                                      <a href={getFileUrl(selectedApplicant.cv_path)} target="_blank" rel="noreferrer" className="flex items-center gap-4 p-3 border rounded-lg hover:border-brand-500 hover:shadow-md transition-all">
@@ -2185,7 +2231,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
                              {/* 1. CHAIN INTERVIEW SYSTEM */}
                              <div className="space-y-6">
                                 {interviewChains.length === 0 ? (
-                                    <div className="text-center py-10 bg-white rounded-xl border border-dashed border-blue-600">
+                                    <div className="text-center py-10 bg-white rounded-xl border border-dashed border-slate-300">
                                         <p className="text-gray-500 text-sm mb-4">Belum ada riwayat proses interview.</p>
                                         <button 
                                             onClick={openNewChainModal}
@@ -2337,12 +2383,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
                              </div>
 
                              {/* 2. ACTIVITY LOG */}
-                             <div className="bg-gray-50 p-6 rounded-xl border border-blue-600 shadow-sm mt-8">
+                             <div className="bg-gray-50 p-6 rounded-xl border border-slate-200 shadow-sm mt-8">
                                 <h3 className="font-bold text-gray-800 text-sm mb-4 flex items-center gap-2">
                                     <StickyNote size={16}/> Catatan Aktivitas Lainnya
                                 </h3>
                                 {/* ... (Note Input & List remains unchanged) ... */}
-                                <div className="mb-6 bg-white p-3 rounded-lg border border-blue-600 shadow-sm">
+                                <div className="mb-6 bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
                                     <textarea 
                                         className="w-full text-sm p-2 bg-transparent outline-none min-h-[80px] placeholder:text-gray-400"
                                         placeholder="Tulis catatan aktivitas baru..."
@@ -2367,7 +2413,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
                                 </div>
                                 <div className="space-y-4">
                                     {timelineNotes.length === 0 ? (
-                                        <div className="text-center py-6 text-gray-400 text-xs italic border border-dashed border-blue-600 rounded-lg">
+                                        <div className="text-center py-6 text-gray-400 text-xs italic border border-dashed border-slate-300 rounded-lg">
                                             Belum ada catatan aktivitas tambahan.
                                         </div>
                                     ) : (
@@ -2437,7 +2483,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
                            </button>
                            
                            <div className="flex gap-2">
-                                <button onClick={openCopyModal} className="p-3 bg-indigo-50 text-indigo-600 rounded-xl hover:bg-indigo-100 border border-indigo-200 transition-all" title="Salin Excel">
+                                <button onClick={openCopyModal} className="p-3 bg-brand-50 text-brand-600 rounded-xl hover:bg-brand-100 border border-brand-200 transition-all" title="Salin Excel">
                                     <Copy size={20}/>
                                 </button>
                                 
